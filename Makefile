@@ -1,5 +1,5 @@
-# XORO Minimal RISC-V System
-# Clean build with only essential components
+# PicoRV32-DE2 RISC-V System
+# Complete RISC-V implementation for Altera DE-2 board
 
 # Build tools
 RISCV_PREFIX = /c/msys64/opt/riscv32/bin/riscv-none-elf-
@@ -30,19 +30,18 @@ C_SOURCES = src/main.c
 ASM_SOURCES = src/start.S
 OBJECTS = $(C_SOURCES:src/%.c=build/%.o) $(ASM_SOURCES:src/%.S=build/%.o)
 
-.PHONY: all clean firmware fpga program help validate-firmware
+.PHONY: all clean firmware fpga program help
 
 all: firmware fpga
 
 help:
-	@echo "XORO Minimal RISC-V Build System"
+	@echo "PicoRV32-DE2 Build System"
 	@echo "Available targets:"
 	@echo "  firmware  - Build RISC-V firmware"
 	@echo "  fpga      - Synthesize FPGA design"
 	@echo "  program   - Program FPGA via JTAG"
 	@echo "  clean     - Clean all build artifacts"
 	@echo "  all       - Build firmware + FPGA"
-	@echo "  validate-firmware - Run comprehensive firmware validation"
 
 # Create build directory
 build:
@@ -122,7 +121,7 @@ check-cable:
 # Program FPGA
 program: $(FPGA_SOF)
 	@echo "Programming FPGA..."
-	cd build/quartus && $(QUARTUS_PGM) -c USB-Blaster -m JTAG -o "p;xoro_minimal.sof"
+	cd build/quartus && $(QUARTUS_PGM) -c USB-Blaster -m JTAG -o "p;riscv_4mif_debug.sof"
 	@echo "✅ FPGA programming complete"
 
 # Clean build artifacts
@@ -138,7 +137,3 @@ debug-firmware:
 debug-mif:
 	head -20 $(FIRMWARE_MIF)
 
-# Firmware validation - depends on firmware target, not individual files
-validate-firmware: firmware
-	@echo "Running firmware validation..."
-	@scripts/validate_firmware.sh
