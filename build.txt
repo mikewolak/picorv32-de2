@@ -1,0 +1,293 @@
+# XORO Minimal RISC-V Build Guide
+# Complete build instructions for RISC-V firmware and FPGA synthesis
+
+## Quick Start (Using Makefile)
+
+### Prerequisites
+- RISC-V GCC Cross-Compiler: /c/msys64/opt/riscv32/bin/riscv-none-elf-*
+- MinGW GCC for host tools: /c/msys64/mingw64/bin/gcc.exe
+- Quartus II 8.0: /c/altera/80/quartus/bin/
+- USB-Blaster JTAG cable connected to DE-2 board
+
+### Complete Build and Flash
+```bash
+cd /c/msys64/home/mwolak/fpgaseq/xoro-minimal
+
+# Build everything (firmware + FPGA)
+/c/msys64/usr/bin/make all
+
+# Program FPGA via JTAG
+/c/msys64/usr/bin/make program
+```
+
+### Individual Build Steps
+```bash
+# Build firmware only
+/c/msys64/usr/bin/make firmware
+
+# Build FPGA only (requires firmware first)
+/c/msys64/usr/bin/make fpga
+
+# Clean all build artifacts
+/c/msys64/usr/bin/make clean
+
+# Check USB-Blaster connection
+/c/msys64/usr/bin/make check-cable
+
+# Debug commands
+/c/msys64/usr/bin/make debug-firmware    # Show disassembly
+/c/msys64/usr/bin/make debug-mif         # Show MIF file contents
+/c/msys64/usr/bin/make validate-firmware # Run validation scripts
+```
+
+## Manual Build Process (Step-by-Step)
+
+### Step 1: Build Host Tools
+```bash
+cd /c/msys64/home/mwolak/fpgaseq/xoro-minimal
+
+# Build bin2mif_enhanced tool (converts binary to MIF files)
+/c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -Wextra -O2 \
+    -o tools/bin2mif_enhanced.exe tools/bin2mif_enhanced.c
+
+# Build basic bin2mif tool (fallback)
+/c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -Wextra -O2 \
+    -o tools/bin2mif.exe tools/bin2mif.c
+```
+
+### Step 2: Create Build Directories
+```bash
+mkdir -p build build/quartus
+```
+
+### Step 3: Compile RISC-V Firmware
+```bash
+# Set environment variables
+export TMP=/tmp
+export TMPDIR=/tmp
+export TEMP=/tmp
+
+# Compile C source files
+/c/msys64/opt/riscv32/bin/riscv-none-elf-gcc \
+    -march=rv32i -mabi=ilp32 -mcmodel=medlow \
+    -nostdlib -Os -ffreestanding -g \
+    -c src/main.c -o build/main.o
+
+# Compile assembly source files
+/c/msys64/opt/riscv32/bin/riscv-none-elf-gcc \
+    -march=rv32i -mabi=ilp32 -mcmodel=medlow \
+    -nostdlib -Os -ffreestanding -g \
+    -c src/start.S -o build/start.o
+
+# Link firmware
+/c/msys64/opt/riscv32/bin/riscv-none-elf-gcc \
+    -T src/linker.ld -nostdlib -Wl,--gc-sections \
+    build/main.o build/start.o \
+    -o build/knight_rider.elf
+
+# Convert to binary
+/c/msys64/opt/riscv32/bin/riscv-none-elf-objcopy \
+    -O binary build/knight_rider.elf build/knight_rider.bin
+
+# Generate disassembly (for debugging)
+/c/msys64/opt/riscv32/bin/riscv-none-elf-objdump \
+    -d build/knight_rider.elf > build/knight_rider.lst
+```
+
+### Step 4: Convert Binary to MIF Files
+```bash
+# Generate 4-symbol MIF files for FPGA Block RAM
+./tools/bin2mif_enhanced.exe \
+    -i build/knight_rider.bin \
+    -o build/quartus/firmware_symbol_%d.mif \
+    --4-symbol --total-size 32768
+
+# This creates:
+# - build/quartus/firmware_symbol_0.mif (byte 0 of each 32-bit word)
+# - build/quartus/firmware_symbol_1.mif (byte 1 of each 32-bit word)
+# - build/quartus/firmware_symbol_2.mif (byte 2 of each 32-bit word)
+# - build/quartus/firmware_symbol_3.mif (byte 3 of each 32-bit word)
+
+# Alternative: Generate single MIF file (for single-port controllers)
+./tools/bin2mif_enhanced.exe \
+    -i build/knight_rider.bin \
+    -o build/quartus/firmware.mif \
+    --single-mif --total-size 32768
+```
+
+### Step 5: FPGA Synthesis
+```bash
+cd build/quartus
+
+# Run Quartus II synthesis
+/c/altera/80/quartus/bin/quartus_sh.exe -t ../../scripts/build_riscv_debug.tcl
+
+# This creates:
+# - riscv_4mif_debug.sof (SRAM Object File for JTAG programming)
+# - riscv_4mif_debug.pof (Programming Object File for Active Serial)
+```
+
+### Step 6: Program FPGA
+```bash
+# JTAG Programming (temporary, lost on power cycle)
+/c/altera/80/quartus/bin/quartus_pgm.exe \
+    -c USB-Blaster -m JTAG \
+    -o "p;riscv_4mif_debug.sof"
+
+# Active Serial Programming (persistent through power cycles)
+/c/altera/80/quartus/bin/quartus_pgm.exe \
+    -c USB-Blaster -m AS \
+    -o "p;riscv_4mif_debug.pof"
+```
+
+## File Structure Overview
+
+### Source Files
+```
+src/
+├── main.c              # Knight Rider firmware (LED pattern generation)
+├── start.S             # RISC-V startup assembly code
+└── linker.ld           # Memory layout and linker script
+```
+
+### RTL Files
+```
+rtl/
+├── test_4mif_riscv_debug.vhd    # Top-level VHDL entity with debug
+├── mem_controller_4mif.v        # 4-symbol MIF memory controller
+├── picorv32.v                   # RISC-V CPU core
+├── hex_display.vhd              # 7-segment display controller
+└── lcd_controller.vhd           # LCD interface controller
+```
+
+### Build Outputs
+```
+build/
+├── knight_rider.elf             # RISC-V ELF executable
+├── knight_rider.bin             # Raw binary firmware
+├── knight_rider.lst             # Assembly listing (debug)
+├── main.o                       # Compiled C object file
+├── start.o                      # Compiled assembly object file
+└── quartus/
+    ├── firmware_symbol_0.mif    # MIF file for byte 0
+    ├── firmware_symbol_1.mif    # MIF file for byte 1
+    ├── firmware_symbol_2.mif    # MIF file for byte 2
+    ├── firmware_symbol_3.mif    # MIF file for byte 3
+    ├── riscv_4mif_debug.sof     # FPGA SRAM Object File
+    └── riscv_4mif_debug.pof     # FPGA Programming Object File
+```
+
+### Tools
+```
+tools/
+├── bin2mif_enhanced.exe         # Binary to MIF converter (enhanced)
+├── bin2mif_enhanced.c           # Source code for enhanced converter
+├── bin2mif.exe                  # Basic binary to MIF converter
+└── bin2mif.c                    # Source code for basic converter
+```
+
+## Detailed Tool Usage
+
+### bin2mif_enhanced Usage
+```bash
+# 4-symbol MIF generation (for 4-port memory controllers)
+./tools/bin2mif_enhanced.exe -i input.bin -o output_symbol_%d.mif --4-symbol --total-size 32768
+
+# Single MIF generation (for single-port memory controllers)
+./tools/bin2mif_enhanced.exe -i input.bin -o output.mif --single-mif --total-size 32768
+
+# Hex format output (for simulation)
+./tools/bin2mif_enhanced.exe -i input.bin -o output.mif --hex --single-mif
+
+# Options:
+#   -i <file>           Input binary file
+#   -o <file>           Output MIF file (use %d for symbol number in 4-symbol mode)
+#   --4-symbol          Generate 4 separate MIF files (one per byte)
+#   --single-mif        Generate single 32-bit MIF file
+#   --hex               Output hex format instead of standard MIF
+#   --total-size <n>    Total memory size in bytes (default: 32768)
+#   --total-blocks <n>  Total M4K blocks (512 bytes each, default: 96)
+```
+
+### RISC-V GCC Compiler Options
+```bash
+# Architecture flags
+-march=rv32i            # RISC-V 32-bit integer instruction set
+-mabi=ilp32             # Application Binary Interface
+-mcmodel=medlow         # Medium-low code model
+
+# Optimization flags
+-Os                     # Optimize for size
+-ffreestanding          # Freestanding environment (no standard library)
+-nostdlib               # Don't link standard library
+-g                      # Include debug information
+
+# Linker flags
+-T src/linker.ld        # Use custom linker script
+-Wl,--gc-sections       # Remove unused sections
+```
+
+### Quartus II Project Settings
+The build script (scripts/build_riscv_debug.tcl) automatically configures:
+- **Device:** EP2C35F672C6 (Cyclone II)
+- **Top-level entity:** test_4mif_riscv_debug
+- **Pin assignments:** DE-2 board layout
+- **MIF files:** 4-symbol memory initialization
+- **Compilation:** Full synthesis, place & route
+
+## Common Issues and Solutions
+
+### Build Issues
+1. **Missing tools:** Ensure all paths in Makefile are correct for your system
+2. **Permission errors:** Run build from MSYS2 shell with proper permissions
+3. **MIF file errors:** Ensure bin2mmif_enhanced.exe is built and executable
+
+### Programming Issues
+1. **USB-Blaster not found:** Check cable connection and drivers
+2. **JTAG chain errors:** Verify FPGA power and cable connection
+3. **Programming failures:** Try different USB ports or restart Quartus Programmer
+
+### Runtime Issues
+1. **No LED pattern:** Check Knight Rider firmware and memory initialization
+2. **Debug not responding:** Verify button connections and debug state machine
+3. **PC starting wrong:** CPU executes 3 instructions during reset (documented issue)
+
+## Development Workflow
+
+### Edit-Build-Test Cycle
+1. **Edit firmware:** Modify src/main.c for Knight Rider pattern changes
+2. **Build:** Run `make firmware` to compile and generate MIF files
+3. **Synthesize:** Run `make fpga` to update FPGA design
+4. **Program:** Run `make program` to flash updated design
+5. **Test:** Observe LED patterns and debug displays on DE-2 board
+
+### Debug System Usage
+- **KEY1:** Run/Halt toggle (starts/stops CPU execution)
+- **KEY2:** Single step (currently broken - runs continuously)
+- **KEY3:** System reset
+- **7-Segment Displays:** Show program counter and cycle count
+- **Red LEDs:** Knight Rider pattern (driven by firmware)
+- **Green LEDs:** Debug status indicators
+
+### Performance Tuning
+- **LED delay:** Modify delay() parameter in src/main.c
+- **Pattern speed:** Current setting: 50,000 cycles (10x faster than original)
+- **Memory optimization:** Adjust --total-size parameter for different firmware sizes
+
+## Current System Status
+
+### Working Features ✅
+- Complete build system with Makefile automation
+- RISC-V firmware compilation and linking
+- 4-symbol MIF file generation for Block RAM
+- FPGA synthesis and programming
+- Basic CPU execution and LED pattern generation
+- Debug system startup in HALT mode with 0 cycles
+
+### Known Issues ❌
+- Step button (KEY2) starts continuous execution instead of single-step
+- Run/halt toggle (KEY1) requires reset workarounds after stopping execution
+- CPU executes 3 instructions during reset before debug system can halt
+- Debug state machine needs rework for proper stepping functionality
+
+This system provides a complete development environment for RISC-V firmware on FPGA with hardware debugging capabilities, despite the current stepping issues.

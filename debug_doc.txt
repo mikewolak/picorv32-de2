@@ -1,0 +1,244 @@
+# RISC-V 4-MIF Debug System Documentation
+
+## Overview
+This is a comprehensive debugging system for the RISC-V PicoRV32 soft-core processor running on an Altera Cyclone II FPGA (DE-2 Development Board). The system provides real-time monitoring of CPU state, memory operations, performance metrics, and includes a working real-time clock.
+
+## Hardware Configuration
+- **FPGA:** Altera Cyclone II EP2C35F672C6 (DE-2 Development Board)
+- **CPU:** PicoRV32 RISC-V soft-core (32-bit RV32I instruction set)
+- **Memory:** 32KB M4K Block RAM (4-symbol MIF architecture)
+- **Clock:** 50MHz system clock
+- **Display:** 16x2 HD44780-compatible LCD + 8x 7-segment displays
+- **Controls:** 4 push buttons (KEY0-KEY3) + 18 switches (SW0-SW17)
+
+## LCD Display Modes
+
+The system has 6 display modes accessible via KEY3 (Mode Switch button):
+
+### Mode 0: Program Counter + Current Instruction
+**Line 1:** `PC:12345678         `
+**Line 2:** `IN:87654321         `
+
+- **PC:** Current program counter value (32-bit hex)
+- **IN:** Current instruction being executed (32-bit hex)
+- Shows the memory address and opcode of the currently executing instruction
+- Updates in real-time as CPU executes
+
+### Mode 1: Memory Address + Memory Data
+**Line 1:** `MA:12345678         `
+**Line 2:** `MD:87654321         `
+
+- **MA:** Current memory address being accessed (32-bit hex)
+- **MD:** Data read from memory at that address (32-bit hex)
+- Shows the address and data for memory read/write operations
+- Useful for tracking data access patterns
+
+### Mode 2: Write Data + Write Strobe/Trap Status
+**Line 1:** `WD:12345678         `
+**Line 2:** `WS:F T:0            `
+
+- **WD:** Data being written to memory (32-bit hex)
+- **WS:** Write strobe mask (4-bit hex, shows which bytes are written)
+- **T:** CPU trap status (0 = normal, 1 = trap/exception occurred)
+- Only meaningful during memory write operations
+
+### Mode 3: CPU Status Flags + Execution State
+**Line 1:** `V:1 R:1 I:1         `
+**Line 2:** `T:0 E:R             `
+
+- **V:** Memory valid signal (1 = memory operation active)
+- **R:** Memory ready signal (1 = memory operation complete)
+- **I:** Instruction fetch flag (1 = fetching instruction, 0 = data access)
+- **T:** CPU trap status (0 = normal, 1 = trap/exception)
+- **E:** Execution state (H = Halted, R = Running, S = Stepping)
+
+### Mode 4: Instruction Count + Cycle Count
+**Line 1:** `IN:12345678         `
+**Line 2:** `CY:87654321         `
+
+- **IN:** Total instruction count (32-bit hex)
+- **CY:** Total cycle count (32-bit hex, lower 32 bits of 64-bit counter)
+- Performance counters tracking executed instructions and clock cycles
+- Useful for calculating CPI (Cycles Per Instruction)
+
+### Mode 5: Real-Time Clock + IPS (Instructions Per Second) ⭐
+**Line 1:** `T00:12:34           `
+**Line 2:** `IPS:200M            `
+
+- **T:** Indicates timer mode
+- **HH:MM:SS:** 24-hour format real-time clock
+- **IPS:** Instructions per second in millions (decimal format)
+- Timer: Accurate 1-second timing using 50MHz clock, BCD format
+- IPS: Real-time performance metric, expected ~200M IPS for optimal performance
+- Both independent of CPU state - always running
+
+## 7-Segment Display
+**HEX7-HEX0:** Shows current program counter (32-bit value)
+- **HEX7-HEX6:** Upper 16 bits of PC
+- **HEX5-HEX4:** Middle 16 bits of PC
+- **HEX3-HEX0:** Lower 16 bits of PC
+- Provides quick visual reference for PC without cycling LCD modes
+
+## Button Controls
+
+### KEY0: Reset
+- **Function:** System reset
+- **Action:** Resets CPU, clears all counters, timer continues running
+- **LED Indicator:** System state visible on red LEDs
+
+### KEY1: Run/Halt Toggle
+- **Function:** CPU execution control
+- **States:**
+  - **RUNNING:** CPU executes instructions normally
+  - **HALTED:** CPU execution paused, state frozen
+  - **STEPPING:** Single instruction execution (after KEY2)
+- **Usage:** Primary debug control for stopping/starting execution
+
+### KEY2: Single Step
+- **Function:** Execute one instruction when halted
+- **Prerequisite:** CPU must be in HALTED state (press KEY1)
+- **Action:** Executes exactly one instruction then returns to HALTED
+- **Usage:** Step-by-step debugging through code execution
+
+### KEY3: Display Mode Switch
+- **Function:** Cycle through LCD display modes
+- **Sequence:** Mode 0 → 1 → 2 → 3 → 4 → 5 → 0 (cycles)
+- **Usage:** Switch between different debug views
+
+## LED Indicators
+
+### Red LEDs (LEDR17-LEDR0)
+- **Function:** Various system status indicators
+- **Usage:** Visual feedback for system state and debug information
+
+## Performance Metrics
+
+### Instruction Counter
+- **Resolution:** 32-bit (up to 4.2 billion instructions)
+- **Accuracy:** Increments with each completed instruction
+- **Display:** Mode 3 (hex) and calculated for IPS display
+
+### IPS Calculation
+- **Formula:** Instructions executed per ~1.34 second sample period
+- **Expected Performance:** ~200M IPS for 50MHz clock with optimal code
+- **Sample Period:** 2^26 clock cycles (67,108,864 cycles)
+- **Display Format:** Decimal millions (e.g., "200M IPS")
+
+### Real-Time Clock
+- **Accuracy:** ±1 clock cycle (20ns @ 50MHz)
+- **Resolution:** 1 second
+- **Format:** BCD (Binary Coded Decimal)
+- **Range:** 00:00:00 to 23:59:59 (24-hour format)
+- **Independence:** Runs regardless of CPU state
+
+## Memory Architecture
+
+### 4-Symbol MIF System
+- **Total Size:** 32KB (8192 words × 4 bytes)
+- **Organization:** 4 separate 8-bit altsyncram instances
+- **Files:** firmware_symbol_0.mif through firmware_symbol_3.mif
+- **Addressing:** Word-aligned 32-bit access with byte selection
+
+### Address Space
+- **Instruction Memory:** 0x00000000-0x00007FFF (32KB)
+- **Data Memory:** Shared with instruction space
+- **Stack:** Typically at top of memory (0x7C00-0x7FFF)
+
+## Build Process
+
+### Prerequisites
+- Quartus II 8.0 or compatible
+- RISC-V GCC cross-compiler toolchain
+- DE-2 development board with USB-Blaster
+
+### Build Commands
+```bash
+# Navigate to project directory
+cd /c/msys64/home/mwolak/fpgaseq/xoro-minimal
+
+# Complete build (firmware + FPGA)
+make all
+
+# Individual steps
+make firmware    # Compile RISC-V firmware to MIF files
+make fpga        # Synthesize FPGA design with Quartus
+make program     # Program FPGA via JTAG (temporary)
+```
+
+### Build Targets
+- **firmware:** Generates MIF files from RISC-V C/assembly source
+- **fpga:** Runs Quartus synthesis and generates .sof file
+- **program:** Programs FPGA using USB-Blaster cable
+- **clean:** Removes build artifacts
+
+## Debugging Workflow
+
+### Basic Debug Session
+1. **Program FPGA:** `make program`
+2. **Start in halted state:** Press KEY1 to halt CPU
+3. **Select display mode:** Press KEY3 to choose debug view
+4. **Step through code:** Press KEY2 to execute single instructions
+5. **Monitor progress:** Watch PC and instruction count
+6. **Resume execution:** Press KEY1 to run continuously
+
+### Performance Analysis
+1. **Switch to IPS mode:** Press KEY3 until Mode 4 selected
+2. **Run CPU:** Ensure CPU is in RUNNING state (KEY1)
+3. **Monitor IPS:** Check instructions per second value
+4. **Compare expected:** Should see ~200M IPS for optimal performance
+
+### Memory Debugging
+1. **Select memory mode:** Mode 1 (Address) or Mode 2 (Write Data)
+2. **Step through instructions:** Use KEY2 for single steps
+3. **Watch memory operations:** Monitor address/data patterns
+4. **Correlate with PC:** Use Mode 0 to see current instruction
+
+## Technical Implementation Details
+
+### Clock Distribution
+- **System Clock:** 50MHz from board oscillator
+- **CPU Clock:** Direct 50MHz connection
+- **LCD Clock:** 50MHz (optimized for fast updates)
+- **Timer Clock:** 50MHz with 49,999,999 divider for 1Hz output
+
+### Signal Processing
+- **Button Debouncing:** Hardware debouncing with edge detection
+- **Display Multiplexing:** Time-division between LCD character positions
+- **Performance Sampling:** Periodic snapshot of instruction counter
+
+### Memory Interface
+- **CPU Interface:** Standard PicoRV32 memory bus
+- **Memory Controller:** 4-symbol MIF controller with proper timing
+- **Address Mapping:** Direct mapping with no MMU
+
+## Troubleshooting
+
+### Common Issues
+1. **Blank LCD:** Check power, contrast, and pin connections
+2. **No CPU execution:** Verify MIF files are generated and loaded
+3. **Incorrect timing:** Check 50MHz clock signal integrity
+4. **Button not responding:** Verify debouncing and pin assignments
+
+### Debug Verification
+1. **Timer working:** Mode 5 should show incrementing seconds
+2. **CPU executing:** Mode 3 instruction count should increase
+3. **Memory access:** Mode 1/2 should show changing values during execution
+4. **Performance:** Mode 4 should show realistic IPS values
+
+## File Structure
+```
+xoro-minimal/
+├── rtl/
+│   ├── test_4mif_riscv_debug.vhd    # Main debug system
+│   ├── lcd_controller.vhd           # HD44780 LCD interface
+│   ├── hex_display.vhd              # 7-segment display driver
+│   ├── mem_controller_4mif.v        # 4-symbol memory controller
+│   └── picorv32.v                   # RISC-V CPU core
+├── scripts/
+│   ├── build_riscv_debug.tcl        # Quartus build script
+│   └── build_memory_4mif.tcl        # Memory controller build
+├── firmware/                        # (if used for test programs)
+└── debug_doc.txt                    # This documentation
+```
+
+This debug system provides comprehensive visibility into RISC-V CPU execution with precise timing references and multiple monitoring modes for effective embedded system development and debugging.

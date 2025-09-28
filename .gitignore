@@ -1,0 +1,44 @@
+# Build artifacts
+build/
+*.o
+*.elf
+*.bin
+*.lst
+*.hex
+*.mif
+
+# Quartus II generated files
+*.qpf
+*.qsf
+*.sof
+*.pof
+*.rpt
+*.pin
+*.smsg
+*.summary
+*.done
+*.log
+db/
+incremental_db/
+output_files/
+simulation/
+greybox_tmp/
+c5_pin_model_dump.txt
+
+# Tool executables
+tools/*.exe
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Backup files
+*.bak
+*.backup
